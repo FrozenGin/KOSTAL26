@@ -1,160 +1,166 @@
-# Version 2: Zustandsbasierte Fahrzeugsteuerung
+# Version 2: State-Based Vehicle Control
 
-Status: Architektur- und Umsetzungsplan; noch keine Implementierung.
+Status: Architecture and implementation plan; not implemented yet.
 
-## Ziel und Ausgangslage
+## Goal and Current State
 
-V2 steuert den PiCar über eine zentrale Zustandsmaschine. Linienfolge,
-Kreuzungserkennung, QR-Auswertung und Fahrmanöver erhalten klare Verantwortlichkeiten.
-Die Dateien in `Version 1/` bleiben als Referenz erhalten.
+V2 controls the PiCar through a central state machine. Line following,
+intersection detection, QR evaluation, and driving maneuvers have clear responsibilities.
+The files in `Version 1/` remain as reference material.
 
-Die vorhandene `main.py` steuert den Ablauf über verschachtelte Schleifen und die
-Flags `active`, `racing` und `notReady`. `curve_follower.py` enthält bereits eine
-Zustandsmaschine, vermischt aber Sensoranalyse, Motorzugriff, Regelung und Ablauf.
-Dieser Ansatz liefert Anregungen für V2, wird jedoch nicht unverändert übernommen.
+The existing `main.py` controls the process with nested loops and the flags `active`,
+`racing`, and `notReady`. `curve_follower.py` already contains a state machine, but
+mixes sensor analysis, motor access, control, and process management. V2 will use its
+ideas without adopting it unchanged.
 
-Konkrete Probleme, die V2 beheben soll:
+Specific problems V2 must solve:
 
-- `sleep()` in Fahrmanövern und QR-Scans unterbricht die laufende Reaktion auf Eingaben.
-- `Picar.set_speed()` begrenzt negative Werte auf null; negative Geschwindigkeit
-  allein erzeugt deshalb keine Rückwärtsbewegung.
-- In `main.py` wird das Muster für `HARDLEFT` bereits von der vorherigen
-  `LEFT`-Bedingung abgefangen.
-- Die Bedeutung von vollständig aktiven/inaktiven Sensoren ist zwischen Kommentaren
-  und Fahrvarianten nicht einheitlich. Die tatsächliche Polarität muss gemessen werden.
-- Im Curve-Follower führen unbekannte QR-Texte, einschließlich des Texts für einen
-  erfolglosen Scan, zum Zielzustand. Auch ein Recovery-Timeout wird als Ziel behandelt.
-- Der Linienverlust wird dort anhand der Aufenthaltszeit im Fahrzustand geprüft,
-  statt anhand der Dauer des tatsächlichen Linienverlusts.
+- `sleep()` in driving maneuvers and QR scans interrupts the response to inputs.
+- `Picar.set_speed()` clamps negative values to zero; negative speed alone therefore
+  cannot drive the vehicle backwards.
+- In `main.py`, the `HARDLEFT` pattern is already caught by the preceding `LEFT`
+  condition.
+- The meaning of fully active/inactive sensors is inconsistent between comments and
+  driving variants. The actual polarity must be measured.
+- In the curve follower, unknown QR text, including failed-scan text, leads to the
+  goal state. A recovery timeout is also treated as a goal.
+- Line loss is checked using time spent in the driving state instead of the duration
+  of the actual line loss.
 
-## Fachlicher V2-Ablauf
+## V2 Functional Flow
 
-Der verbindliche Ablauf für die erste V2 ist:
+The first V2 must follow this process:
 
-1. Das Fahrzeug wartet auf das definierte Startsignal.
-2. Es folgt die Linie mit niedriger, konfigurierbarer Geschwindigkeit.
-3. An einer bestätigten X-Kreuzung hält es vollständig an.
-4. Der QR-Code wird aus mehreren Kamerapositionen gelesen.
-5. Der Inhalt wird exakt als QR-Routenkennung gelesen: `RIGHT`, `LEVEL_1` oder
-   `LEVEL_2`.
-6. Die gewünschte Route wird nicht aus beliebigen QR-Inhalten abgeleitet, sondern
-   über die Konstante `TARGET_ROUTE` in der Konfiguration festgelegt.
-7. Nur das zur Auswahl passende, im Streckenprofil hinterlegte Manöver wird gefahren;
-   danach folgt das Fahrzeug wieder der Linie.
-8. Das Ziel wird nur durch ein bestätigtes Zielmuster oder einen definierten
-   Ziel-QR-Code erkannt.
+1. The vehicle waits on a completely black start line with the motors stopped.
+2. After leaving the start line, it drives slowly forward until the normal line is
+   detected stably.
+3. It follows the line at a low, configurable speed.
+4. At a confirmed X-shaped intersection, it stops completely.
+5. The QR code is scanned from multiple camera positions. It contains either only a
+   direction (`left` or `right`) or two text lines: level and direction.
+6. For a two-line QR code, the level is read exactly and compared with the
+   `TARGET_LEVEL` constant in the configuration.
+7. If the level matches, or if the QR code contains only a direction, that direction
+   is used as the maneuver and the corresponding track profile is executed. The
+   vehicle then follows the line again.
+8. The goal is recognized only through a confirmed goal pattern or a defined goal QR
+   code.
 
-Die verbindlichen QR-Inhalte sind zunächst `right`, `level1` und `level2`.
-Nach Normalisierung von Groß-/Kleinschreibung und Leerzeichen werden sie exakt auf
-folgende QR-Routenkennungen abgebildet: `right` ist der einfache Weg, `level1` und
-`level2` sind die schwierigeren Wege. Die Erkennung darf nicht über Teilstrings
-erfolgen. Ein ungültiger oder fehlender QR-Code ist ein Fehler und niemals ein
-Zielsignal.
+The QR content has one of two valid formats:
 
-`TARGET_ROUTE` wird nach der Konfiguration validiert und bleibt während eines Laufs
-unverändert. Der QR-Scan liefert eine erkannte Route und dient zur Prüfung, ob die
-Kreuzung zur gewählten Route gehört. Welche Abzweigung, Fahrtrichtung, Folge von
-Kreuzungen und maximale Dauer zu `RIGHT`, `LEVEL_1` oder `LEVEL_2` gehören, steht in
-einem expliziten Streckenprofil statt in verstreuten `if`-Bedingungen.
+- One line: `left` or `right`.
+- Two lines: `level1` or `level2`, followed by `left` or `right`.
 
-## Zustandsmodell
+After normalizing case and line endings, the values are checked exactly. Substrings,
+unknown levels, and other directions are invalid. An invalid or missing QR code is an
+error and never proof of reaching the goal.
 
-Ein `StateId`-Enum beschreibt den Ablauf. Sensorbefunde und QR-Kommandos bekommen
-eigene Typen; beispielsweise ist `LEFT` eine Richtungsangabe, kein Betriebszustand.
+`TARGET_LEVEL` is validated during configuration and remains unchanged during a run.
+The QR scanner returns a structured command with an optional `level` and `direction`.
+When a level is present, the direction is used only if it matches `TARGET_LEVEL`.
+Without a level, the direction is used directly. The branch, direction, sequence of
+intersections, and maximum duration for each level belong in an explicit track profile,
+not in scattered `if` statements.
 
-| State | Aufgabe | Übergänge |
+## State Model
+
+A `StateId` enum describes the process. Sensor observations and QR commands have
+separate types; for example, `LEFT` is a direction, not an operating state.
+
+| State | Responsibility | Transitions |
 | --- | --- | --- |
-| `INIT` | Hardware initialisieren, Konfiguration prüfen, Motoren stoppen | Bereit → `WAIT_START`; Fehler → `ERROR` |
-| `WAIT_START` | Mit stehenden Motoren auf ein bestätigtes Startsignal warten | Start → `FOLLOW_LINE` |
-| `FOLLOW_LINE` | Linie und Kurven anhand der aktuellen Sensorlage verfolgen | Bestätigte X-Kreuzung → `CHECK_MARKER`; anhaltender Linienverlust → `RECOVER_LINE` |
-| `CHECK_MARKER` | Anhalten und X-Kreuzung anhand Verlauf und Streckenregeln bewerten | QR erforderlich → `SCAN_QR`; Fehlalarm mit gültiger Linie → `FOLLOW_LINE`; bestätigtes Ziel → `FINISHED`; ungeklärt/Timeout → `ERROR` |
-| `SCAN_QR` | Im Stand Kamerapositionen schrittweise abfahren und QR lesen | QR entspricht `TARGET_ROUTE` → `EXECUTE_MANEUVER`; bestätigtes Zielkommando → `FINISHED`; Versuche erschöpft/Kamerafehler → `ERROR` |
-| `EXECUTE_MANEUVER` | Das zur gewählten Route gehörende Manöver über die Markierung fahren | Markierung verlassen und Ziellinie stabil gefunden → `FOLLOW_LINE`; Timeout → `ERROR` |
-| `RECOVER_LINE` | Linie zeitlich begrenzt anhand der letzten bekannten Richtung suchen | Gültige Linie stabil gefunden → `FOLLOW_LINE`; Markierung erkannt → `CHECK_MARKER`; Timeout → `ERROR` |
-| `FINISHED` | Erfolgreichen Abschluss melden, Motoren stoppen | Endzustand |
-| `ERROR` | Fehler mit Ursache melden, Motoren stoppen | Endzustand |
-| `STOPPED` | Benutzerabbruch behandeln, Motoren stoppen | Endzustand |
+| `INIT` | Initialize hardware, validate configuration, stop motors | Ready -> `WAIT_START`; error -> `ERROR` |
+| `WAIT_START` | Wait with motors stopped on a completely black start line | Start line left -> `START_EXIT` |
+| `START_EXIT` | Drive slowly forward until the normal line is detected stably | Line found -> `FOLLOW_LINE`; timeout -> `ERROR` |
+| `FOLLOW_LINE` | Follow the line and curves using current sensor data | Confirmed X intersection -> `CHECK_MARKER`; persistent line loss -> `RECOVER_LINE` |
+| `CHECK_MARKER` | Stop and evaluate the X intersection using history and track rules | QR required -> `SCAN_QR`; false positive with valid line -> `FOLLOW_LINE`; confirmed goal -> `FINISHED`; unresolved/timeout -> `ERROR` |
+| `SCAN_QR` | Scan QR from multiple camera positions while stopped | Direction-only QR or matching level -> direction to `EXECUTE_MANEUVER`; confirmed goal command -> `FINISHED`; attempts exhausted/camera error -> `ERROR` |
+| `EXECUTE_MANEUVER` | Execute the maneuver selected by the QR direction | Intersection left and target line stable -> `FOLLOW_LINE`; timeout -> `ERROR` |
+| `RECOVER_LINE` | Search for the line for a limited time using the last known direction | Stable line found -> `FOLLOW_LINE`; marker detected -> `CHECK_MARKER`; timeout -> `ERROR` |
+| `FINISHED` | Report successful completion and stop motors | Terminal state |
+| `ERROR` | Report the cause and stop motors | Terminal state |
+| `STOPPED` | Handle user cancellation and stop motors | Terminal state |
 
-Benutzerabbruch führt aus jedem aktiven Zustand zu `STOPPED`, ein schwerer
-Hardwarefehler zu `ERROR`. Endzustände starten nicht selbstständig erneut.
-Fehler oder ein fehlender QR-Code sind niemals ein Zielnachweis.
+User cancellation leads from every active state to `STOPPED`; a serious hardware error
+leads to `ERROR`. Terminal states do not restart automatically. An error or missing QR
+code is never proof of reaching the goal.
 
 ```mermaid
 stateDiagram-v2
     [*] --> INIT
-    INIT --> WAIT_START: bereit
-    WAIT_START --> FOLLOW_LINE: Startsignal
-    FOLLOW_LINE --> CHECK_MARKER: Markierung bestätigt
-    CHECK_MARKER --> FOLLOW_LINE: Fehlalarm
-    CHECK_MARKER --> SCAN_QR: QR erforderlich
-    CHECK_MARKER --> FINISHED: Ziel bestätigt
-    SCAN_QR --> EXECUTE_MANEUVER: QR entspricht TARGET_ROUTE
-    SCAN_QR --> FINISHED: Zielkommando bestätigt
-    EXECUTE_MANEUVER --> FOLLOW_LINE: neue Linie stabil
-    FOLLOW_LINE --> RECOVER_LINE: Linie verloren
-    RECOVER_LINE --> FOLLOW_LINE: Linie wiedergefunden
-    RECOVER_LINE --> CHECK_MARKER: Markierung erkannt
-    RECOVER_LINE --> ERROR: Timeout
-    SCAN_QR --> ERROR: Scan erfolglos
-    EXECUTE_MANEUVER --> ERROR: Timeout
-    CHECK_MARKER --> ERROR: ungeklärt
-    INIT --> ERROR: Initialisierung fehlgeschlagen
+    INIT --> WAIT_START: ready
+    WAIT_START --> START_EXIT: start line left
+    START_EXIT --> FOLLOW_LINE: line stable
+    START_EXIT --> ERROR: timeout
+    FOLLOW_LINE --> CHECK_MARKER: marker confirmed
+    CHECK_MARKER --> FOLLOW_LINE: false positive
+    CHECK_MARKER --> SCAN_QR: QR required
+    CHECK_MARKER --> FINISHED: goal confirmed
+    SCAN_QR --> EXECUTE_MANEUVER: direction direct or level matches TARGET_LEVEL
+    SCAN_QR --> FINISHED: goal command confirmed
+    EXECUTE_MANEUVER --> FOLLOW_LINE: new line stable
+    FOLLOW_LINE --> RECOVER_LINE: line lost
+    RECOVER_LINE --> FOLLOW_LINE: line found again
+    RECOVER_LINE --> CHECK_MARKER: marker detected
+    RECOVER_LINE --> ERROR: timeout
+    SCAN_QR --> ERROR: scan failed
+    EXECUTE_MANEUVER --> ERROR: timeout
+    CHECK_MARKER --> ERROR: unresolved
+    INIT --> ERROR: initialization failed
     FINISHED --> [*]
     ERROR --> [*]
     STOPPED --> [*]
 ```
 
-Globale Fehler- und Abbruchübergänge sind zugunsten der Lesbarkeit nicht für jeden
-State im Diagramm eingezeichnet.
+Global error and cancellation transitions are omitted from the diagram for readability.
 
-Kurven benötigen zunächst keinen eigenen State: Die Linienregelung passt
-Lenkung und Geschwindigkeit laufend an. Punktmuster werden erst als zusätzlicher
-Ablauf aufgenommen, wenn ihre Bedeutung auf der Strecke geklärt ist.
+Curves do not initially need a separate state: the line controller continuously adjusts
+steering and speed. Point patterns become a separate process only after their meaning
+on the track has been clarified.
 
-## Ablauf eines Steuerungstakts
+## Control Cycle
 
-Als Ausgangswert sind 20 ms pro Takt vorgesehen; der Wert wird am Fahrzeug geprüft.
-Zeitmessung erfolgt mit einer monotonen Uhr, die in Tests ersetzt werden kann.
+The initial target is 20 ms per cycle; this must be verified on the vehicle. Time is
+measured with a monotonic clock that can be replaced in tests.
 
-1. Abbruch und Hardwarefehler prüfen; Sensoren einmal lesen und mit Zeitstempel versehen.
-2. Sensorwerte normalisieren und daraus Linienposition sowie Markierungskandidaten bestimmen.
-3. Den aktuellen State über `update(context, observation, now)` ausführen.
-4. Einen angeforderten Wechsel zentral validieren, `exit()` und `enter()` aufrufen
-   und den Wechsel einschließlich Ursache protokollieren.
-5. Den für den neuen beziehungsweise verbleibenden State gültigen Motorbefehl
-   anwenden; beim Wechsel niemals unbeabsichtigt den alten Fahrbefehl beibehalten.
-6. Nur die verbleibende Taktzeit warten. Überläufe protokollieren.
+1. Check cancellation and hardware errors; read sensors once and timestamp them.
+2. Normalize sensor values and derive line position and marker candidates.
+3. Run the current state through `update(context, observation, now)`.
+4. Validate the requested transition centrally, call `exit()` and `enter()`, and log
+   the transition and its cause.
+5. Apply the motor command valid for the new or remaining state; never unintentionally
+   retain the old driving command across a transition.
+6. Wait only for the remaining cycle time and log overruns.
 
-`enter()` setzt Timer und lokale Zustandsdaten zurück; `exit()` beendet laufende
-Aktionen. State-Handler enthalten keine eigenen Warteschleifen oder `sleep()`-Aufrufe.
-Motorbefehle haben standardmäßig den Wert Stopp. Bei Abbruch, Fehler und Programmende
-werden die Motoren unmittelbar gestoppt; Cleanup erfolgt auch bei teilweise
-fehlgeschlagener Initialisierung und darf mehrfach aufgerufen werden.
+`enter()` resets timers and local state; `exit()` ends active actions. State handlers
+must not contain their own loops or `sleep()` calls. Motor commands default to stop.
+On cancellation, error, and program exit, motors stop immediately. Cleanup also runs
+after partial initialization failure and may be called repeatedly.
 
-Der QR-Scan erhält intern die Phasen Kamera ausrichten, Einschwingzeit abwarten und
-Bild auswerten. Kameraaufnahme und Dekodierung laufen bei potenziell blockierenden
-Aufrufen in einem begrenzten Worker außerhalb des Steuertakts. Dieser liefert nur
-Ergebnisse; Servo- und Motorbefehle bleiben beim Steuerungsablauf. Es gibt höchstens
-einen offenen Scanauftrag, eine Scan-ID gegen verspätete Ergebnisse und eine Deadline.
-Bei Abbruch werden Ergebnisse verworfen und der Worker kontrolliert beendet; falls
-der Kameratreiber nicht abbrechbar ist, ist ein separat beendbarer Prozess vorzusehen.
+The QR scan internally has phases for moving the camera, waiting for it to settle, and
+processing the image. Potentially blocking camera capture and decoding run in a bounded
+worker outside the control cycle. The worker returns results only; servo and motor
+commands remain in the control flow. At most one scan request may be open, with a scan
+ID to reject late results and a deadline. On cancellation, results are discarded and
+the worker is shut down in a controlled way. If the camera driver cannot be cancelled,
+use a separately terminable process.
 
-## Modulstruktur
+## Module Structure
 
-Vorgesehener Einstieg: `python -m version2`.
+Planned entry point: `python -m version2`.
 
 ```text
 version2/
     __init__.py
-    __main__.py             # Programmeinstieg
-    app.py                  # Aufbau, Steuertakt, Abbruch und Cleanup
-    config.py               # Typisierte Konfiguration und Plausibilitätsprüfung
-    models.py               # StateId, Beobachtungen, QR-Kommandos, Motorbefehle
-    state_machine.py        # Übergänge, enter/update/exit, Wechselprotokoll
+    __main__.py             # program entry point
+    app.py                  # setup, control cycle, cancellation, and cleanup
+    config.py               # typed configuration and validation
+    models.py               # StateId, observations, QR commands, motor commands
+    state_machine.py        # transitions, enter/update/exit, transition logging
     states/
         __init__.py
-        base.py             # Gemeinsame State-Schnittstelle und Kontext
-        lifecycle.py        # INIT, WAIT_START und Endzustände
+        base.py             # shared state interface and context
+        lifecycle.py        # INIT, WAIT_START, START_EXIT, and terminal states
         follow_line.py
         check_marker.py
         scan_qr.py
@@ -162,94 +168,91 @@ version2/
         recover_line.py
     control/
         __init__.py
-        line_controller.py  # Linienregelung ohne Hardwarezugriff
+        line_controller.py   # line control without hardware access
     perception/
         __init__.py
-        line_analysis.py    # Polarität, Position, Muster und zeitliche Bestätigung
-        qr_commands.py      # QR-Text in explizite Kommandos übersetzen
+        line_analysis.py     # polarity, position, patterns, and confirmation timing
+        qr_commands.py       # translate QR text into explicit commands
     hardware/
         __init__.py
-        interfaces.py       # Austauschbare Fahrzeug- und Kameraschnittstellen
-        picar.py            # GPIO/PWM, Sensoren, Servo, Motoren und Freigabe
-        qr_camera.py        # Kameraaufnahme, Dekodierung und Worker-Lebenszyklus
+        interfaces.py        # replaceable vehicle and camera interfaces
+        picar.py             # GPIO/PWM, sensors, servo, motors, and release
+        qr_camera.py         # camera capture, decoding, and worker lifecycle
 tests/version2/
-    fakes.py                # Simulierte Hardware und steuerbare Uhr
+    fakes.py                # simulated hardware and controllable clock
     test_line_analysis.py
     test_qr_commands.py
     test_state_machine.py
     test_scenarios.py
 ```
 
-Hardware-Bibliotheken werden nur in den Adaptern geladen und Hardware wird erst
-beim expliziten Programmstart initialisiert. Logiktests funktionieren ohne Raspberry Pi.
-Ein State-Machine-Framework ist für diesen Umfang nicht erforderlich.
+Hardware libraries are imported only in adapters, and hardware is initialized only
+when the program is explicitly started. Logic tests run without a Raspberry Pi. A
+state-machine framework is unnecessary for this scope.
 
-## Verhaltensregeln
+## Behavior Rules
 
-- Sensorwerte werden auf `True = Linie erkannt` normalisiert. Die reale Polarität
-  und Links-rechts-Reihenfolge werden vor dem Fahrtest kalibriert.
-- Keine aktive Linie ergibt eine fehlende Linienposition, nicht Position null.
-  Breite Markierungen werden vor der normalen Lenkregelung ausgewertet.
-- Markierungen und wiedergefundene Linien müssen über eine konfigurierbare Dauer
-  stabil sein. Linienverlust hat einen eigenen Timer.
-- Eine Scan-Kreuzung ist ein bestätigtes X-Muster. Nach einer Kreuzung wird ihre
-  Erkennung erst wieder freigegeben, wenn das alte X sicher verlassen wurde. Das
-  verhindert wiederholte Scans am selben Ort.
-- Ein Abbiegemanöver umfasst Ausfahrt aus der bisherigen Markierung und Suche nach
-  der gewünschten Linie. Die noch sichtbare Eingangslinie darf es nicht sofort beenden.
-- Die Linienregelung beginnt mit einer einfachen proportionalen Korrektur.
-  PID-Erweiterungen folgen nur bei Bedarf; sie verwenden gemessenes `dt`, begrenzen
-  das Integral und setzen ihren Verlauf beim Wiederbeginn der Linienfolge zurück.
-- Motorbefehle enthalten vorzeichenbehaftete Sollwerte im Bereich `[-1, 1]`.
-  Der Adapter übersetzt das Vorzeichen in Richtung und den Betrag in PWM;
-  vor einem Richtungswechsel wird die Leistung auf null gesetzt.
-- QR-Ergebnisse unterscheiden `FOUND`, `NOT_FOUND` und `ERROR`; der Parser
-  unterscheidet gültige Kommandos und unbekannte Texte. Keine Substring-Regel
-  interpretiert beliebige Inhalte als Ziel oder Abbiegung.
-- Die verbindlichen V2-QR-Werte sind `right`, `level1` und `level2`. Sie werden exakt
-  auf `RIGHT`, `LEVEL_1` und `LEVEL_2` abgebildet. `right` steht immer für den
-  einfachen Weg; `level1` und `level2` stehen für die schwereren Wege. Unbekannte
-  QR-Texte werden abgelehnt.
-- `TARGET_ROUTE` in `config.py` legt fest, welches Level gefahren werden soll und
-  darf nur `RIGHT`, `LEVEL_1` oder `LEVEL_2` enthalten. Geschwindigkeiten, Zeitlimits,
-  Scanpositionen, Servooffset und Erkennungszeiten liegen ebenfalls in `config.py`.
-  Eine ungültige Konfiguration verhindert den Fahrtbeginn.
+- Normalize sensor values to `True = line detected`. Calibrate the actual polarity and
+  left-to-right order before driving tests.
+- No active line means no line position, not position zero. Evaluate wide markers
+  before normal steering control.
+- Markers and recovered lines must remain stable for a configurable duration. Line
+  loss has its own timer.
+- A scan intersection is a confirmed X pattern. Re-enable intersection detection only
+  after the old X has definitely been left, preventing repeated scans at one location.
+- A turn maneuver includes leaving the old marker and searching for the desired line.
+  The still-visible entry line must not finish the maneuver immediately.
+- Start line exit uses slow forward motion until the normal line is detected stably.
+- Begin line control with a simple proportional correction. Add PID only if needed;
+  use measured `dt`, limit the integral, and reset controller history when line
+  following resumes.
+- Motor commands use signed target values in `[-1, 1]`. The adapter translates the
+  sign into direction and the magnitude into PWM; set power to zero before reversing.
+- QR results distinguish `FOUND`, `NOT_FOUND`, and `ERROR`. The parser distinguishes
+  valid commands from unknown text. No substring rule may interpret arbitrary content
+  as a goal or turn.
+- A V2 QR command is either a direction only (`left`, `right`) or two text lines:
+  level (`level1`, `level2`) and direction (`left`, `right`). Both values are validated
+  separately and stored in a structured command.
+- `TARGET_LEVEL` in `config.py` selects the level for two-line QR codes. For a
+  direction-only QR code, the direction is taken directly from the single value.
+  Speeds, timeouts, scan positions, servo offset, and detection timings also belong in
+  `config.py`. Invalid configuration prevents the vehicle from starting.
 
-## Umsetzungsschritte und Abnahme
+## Implementation and Acceptance
 
-1. **Streckenregeln und Hardwareaufnahme:** Sensorpolarität, Startablauf,
-   Kreuzungs-/Zielmuster und QR-Inhalte dokumentieren. Repräsentative Sensorfolgen
-   als Testdaten erfassen.
-2. **Grundgerüst:** Datenmodelle, Konfiguration, Hardware-Schnittstellen und
-   Zustandsmaschine anlegen. Mit Fake-Hardware Start, Abbruch, Fehler und Cleanup prüfen.
-3. **Linienfolge:** Sensoranalyse, proportionale Regelung und begrenzte Liniensuche
-   implementieren. Alle 32 binären Sensormuster auf definierte Behandlung prüfen;
-   Verlaufstests decken kurze Aussetzer und dauerhaften Linienverlust ab.
-4. **X-Kreuzungen und QR:** X-Muster bestätigen, Scanphasen, Parser, Routenprofile
-   und Manöver ergänzen.
-   Erfolglose Scans, unbekannte Texte, verspätete Ergebnisse, wiederholte Markierungen
-   und Manöver-Timeouts testen. Keine dieser Fehlerfolgen darf `FINISHED` auslösen.
-5. **Fahrzeugtest:** Zunächst Motorzuordnung und Stoppen bei angehobenen Rädern prüfen,
-   danach Start, Gerade, Kurven, Kreuzung und Ziel mit geringer Geschwindigkeit testen.
-   Zeitparameter und Regelung anhand der Messungen abstimmen.
+1. **Track rules and hardware survey:** document sensor polarity, start behavior,
+   intersection/goal patterns, and QR contents. Record representative sensor sequences
+   as test data.
+2. **Foundation:** create data models, configuration, hardware interfaces, and the
+   state machine. Test start, cancellation, errors, and cleanup with fake hardware.
+3. **Line following:** implement sensor analysis, proportional control, and bounded
+   line search. Define behavior for all 32 binary sensor patterns; sequence tests must
+   cover short interruptions and persistent line loss.
+4. **X intersections and QR:** confirm X patterns, add scan phases, parser, route
+   profiles, and maneuvers. Test failed scans, unknown text, late results, repeated
+   markers, and maneuver timeouts. None of these failure paths may produce `FINISHED`.
+5. **Vehicle test:** first verify motor mapping and stopping with the wheels lifted,
+   then test start, straight sections, curves, intersections, and the goal at low
+   speed. Tune timings and control from measurements.
 
-V2 ist abnahmebereit, wenn der vereinbarte Streckenablauf reproduzierbar funktioniert,
-alle Übergänge samt Ursache nachvollziehbar sind und Abbruch oder Fehler in jedem
-aktiven State zum Stopp führen. Tests müssen ausdrücklich auch Motorbefehle beim
-Zustandswechsel und das Cleanup nach Initialisierungsfehlern prüfen.
+V2 is ready for acceptance when the agreed track sequence works reproducibly, every
+transition is traceable with its cause, and cancellation or errors stop the vehicle
+from every active state. Tests must explicitly cover motor commands during transitions
+and cleanup after initialization failures.
 
-## Noch festzulegende Streckenregeln
+## Track Rules Still To Define
 
-- Was löst den Start aus? Benötigt der Startbereich eine aktive Ausfahrt?
-  Falls ja, wird dafür ein begrenzter Startabschnitt vor `FOLLOW_LINE` ergänzt.
-- Wie unterscheiden sich X-Kreuzung, Linienlücke, Punktmuster und Ziel eindeutig?
-- Welche konkrete Abzweigung beziehungsweise Kreuzungsfolge gehört zu `right`,
-  `level1` und `level2`?
-- Was passiert bei einem gültigen QR-Code, der nicht `TARGET_ROUTE` entspricht?
-  Planannahme: Die Kreuzung wird ohne Routenmanöver verlassen und die Linienfolge
-  wird fortgesetzt; alternativ muss die Strecke ein Stoppen als Fehler festlegen.
-- Darf das Fahrzeug bei fehlendem QR-Code weiterfahren? Planannahme: Nach begrenzten
-  Versuchen mit `ERROR` stoppen; eine andere Regel muss ausdrücklich festgelegt werden.
+- The start signal is leaving a completely black start line. The duration required for
+  stable start-line and exit detection still needs to be configured.
+- How can an X intersection, line gap, other point patterns, and the goal be clearly
+  distinguished?
+- Which exact branch or intersection sequence belongs to each level and direction?
+- What happens when a valid QR code has a level different from `TARGET_LEVEL`?
+  Plan assumption: leave the intersection without a route maneuver and continue line
+  following; alternatively, the track must define stopping as an error.
+- May the vehicle continue after a missing QR code? Plan assumption: after a limited
+  number of attempts, stop with `ERROR`; another rule must be explicitly defined.
 
-Diese Fragen blockieren das Grundgerüst nicht. Die zugehörigen Fahrregeln und ihre
-Abnahmetests werden erst mit den bestätigten Streckeninformationen festgeschrieben.
+These questions do not block the foundation. Their driving rules and acceptance tests
+will be fixed after the track information is confirmed.
