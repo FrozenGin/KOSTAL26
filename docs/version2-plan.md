@@ -33,23 +33,29 @@ Der verbindliche Ablauf für die erste V2 ist:
 
 1. Das Fahrzeug wartet auf das definierte Startsignal.
 2. Es folgt die Linie mit niedriger, konfigurierbarer Geschwindigkeit.
-3. An einer bestätigten QR-Markierung hält es vollständig an.
+3. An einer bestätigten X-Kreuzung hält es vollständig an.
 4. Der QR-Code wird aus mehreren Kamerapositionen gelesen.
-5. Der Inhalt wird exakt in eine Routenentscheidung übersetzt: `EASY` oder `HARD`.
-6. Das Fahrzeug fährt das zugehörige, im Streckenprofil hinterlegte Manöver und folgt
-   danach wieder der Linie.
-7. Das Ziel wird nur durch ein bestätigtes Zielmuster oder einen definierten
+5. Der Inhalt wird exakt als QR-Routenkennung gelesen: `RIGHT`, `LEVEL_1` oder
+   `LEVEL_2`.
+6. Die gewünschte Route wird nicht aus beliebigen QR-Inhalten abgeleitet, sondern
+   über die Konstante `TARGET_ROUTE` in der Konfiguration festgelegt.
+7. Nur das zur Auswahl passende, im Streckenprofil hinterlegte Manöver wird gefahren;
+   danach folgt das Fahrzeug wieder der Linie.
+8. Das Ziel wird nur durch ein bestätigtes Zielmuster oder einen definierten
    Ziel-QR-Code erkannt.
 
-Das empfohlene QR-Format ist zunächst `ROUTE:EASY` beziehungsweise `ROUTE:HARD`.
-`LEVEL 1` und `LEVEL 2` können als dokumentierte Aliase akzeptiert werden, dürfen
-aber nicht über Teilstrings oder unbekannte Texte erkannt werden. Ein ungültiger,
-fehlender oder widersprüchlicher QR-Code ist ein Fehler und niemals ein Zielsignal.
+Die verbindlichen QR-Inhalte sind zunächst `right`, `level1` und `level2`.
+Nach Normalisierung von Groß-/Kleinschreibung und Leerzeichen werden sie exakt auf
+folgende QR-Routenkennungen abgebildet: `right` ist der einfache Weg, `level1` und
+`level2` sind die schwierigeren Wege. Die Erkennung darf nicht über Teilstrings
+erfolgen. Ein ungültiger oder fehlender QR-Code ist ein Fehler und niemals ein
+Zielsignal.
 
-Die Routenentscheidung wird nach erfolgreichem Scan einmal gespeichert und bleibt bis
-zum Ende des Manövers unverändert. Welche Abzweigung, Fahrtrichtung und maximale
-Dauer zu `EASY` oder `HARD` gehören, steht in einem expliziten Streckenprofil statt
-in verstreuten `if`-Bedingungen.
+`TARGET_ROUTE` wird nach der Konfiguration validiert und bleibt während eines Laufs
+unverändert. Der QR-Scan liefert eine erkannte Route und dient zur Prüfung, ob die
+Kreuzung zur gewählten Route gehört. Welche Abzweigung, Fahrtrichtung, Folge von
+Kreuzungen und maximale Dauer zu `RIGHT`, `LEVEL_1` oder `LEVEL_2` gehören, steht in
+einem expliziten Streckenprofil statt in verstreuten `if`-Bedingungen.
 
 ## Zustandsmodell
 
@@ -60,9 +66,9 @@ eigene Typen; beispielsweise ist `LEFT` eine Richtungsangabe, kein Betriebszusta
 | --- | --- | --- |
 | `INIT` | Hardware initialisieren, Konfiguration prüfen, Motoren stoppen | Bereit → `WAIT_START`; Fehler → `ERROR` |
 | `WAIT_START` | Mit stehenden Motoren auf ein bestätigtes Startsignal warten | Start → `FOLLOW_LINE` |
-| `FOLLOW_LINE` | Linie und Kurven anhand der aktuellen Sensorlage verfolgen | Bestätigte Markierung → `CHECK_MARKER`; anhaltender Linienverlust → `RECOVER_LINE` |
-| `CHECK_MARKER` | Anhalten und Markierung anhand Verlauf und Streckenregeln bewerten | QR erforderlich → `SCAN_QR`; Fehlalarm mit gültiger Linie → `FOLLOW_LINE`; bestätigtes Ziel → `FINISHED`; ungeklärt/Timeout → `ERROR` |
-| `SCAN_QR` | Im Stand Kamerapositionen schrittweise abfahren und QR lesen | `EASY`/`HARD` → `EXECUTE_MANEUVER`; bestätigtes Zielkommando → `FINISHED`; Versuche erschöpft/Kamerafehler → `ERROR` |
+| `FOLLOW_LINE` | Linie und Kurven anhand der aktuellen Sensorlage verfolgen | Bestätigte X-Kreuzung → `CHECK_MARKER`; anhaltender Linienverlust → `RECOVER_LINE` |
+| `CHECK_MARKER` | Anhalten und X-Kreuzung anhand Verlauf und Streckenregeln bewerten | QR erforderlich → `SCAN_QR`; Fehlalarm mit gültiger Linie → `FOLLOW_LINE`; bestätigtes Ziel → `FINISHED`; ungeklärt/Timeout → `ERROR` |
+| `SCAN_QR` | Im Stand Kamerapositionen schrittweise abfahren und QR lesen | QR entspricht `TARGET_ROUTE` → `EXECUTE_MANEUVER`; bestätigtes Zielkommando → `FINISHED`; Versuche erschöpft/Kamerafehler → `ERROR` |
 | `EXECUTE_MANEUVER` | Das zur gewählten Route gehörende Manöver über die Markierung fahren | Markierung verlassen und Ziellinie stabil gefunden → `FOLLOW_LINE`; Timeout → `ERROR` |
 | `RECOVER_LINE` | Linie zeitlich begrenzt anhand der letzten bekannten Richtung suchen | Gültige Linie stabil gefunden → `FOLLOW_LINE`; Markierung erkannt → `CHECK_MARKER`; Timeout → `ERROR` |
 | `FINISHED` | Erfolgreichen Abschluss melden, Motoren stoppen | Endzustand |
@@ -82,7 +88,7 @@ stateDiagram-v2
     CHECK_MARKER --> FOLLOW_LINE: Fehlalarm
     CHECK_MARKER --> SCAN_QR: QR erforderlich
     CHECK_MARKER --> FINISHED: Ziel bestätigt
-    SCAN_QR --> EXECUTE_MANEUVER: EASY oder HARD
+    SCAN_QR --> EXECUTE_MANEUVER: QR entspricht TARGET_ROUTE
     SCAN_QR --> FINISHED: Zielkommando bestätigt
     EXECUTE_MANEUVER --> FOLLOW_LINE: neue Linie stabil
     FOLLOW_LINE --> RECOVER_LINE: Linie verloren
@@ -186,8 +192,9 @@ Ein State-Machine-Framework ist für diesen Umfang nicht erforderlich.
   Breite Markierungen werden vor der normalen Lenkregelung ausgewertet.
 - Markierungen und wiedergefundene Linien müssen über eine konfigurierbare Dauer
   stabil sein. Linienverlust hat einen eigenen Timer.
-- Nach einer Kreuzung wird ihre Erkennung erst wieder freigegeben, wenn die alte
-  Markierung sicher verlassen wurde. Das verhindert wiederholte Scans am selben Ort.
+- Eine Scan-Kreuzung ist ein bestätigtes X-Muster. Nach einer Kreuzung wird ihre
+  Erkennung erst wieder freigegeben, wenn das alte X sicher verlassen wurde. Das
+  verhindert wiederholte Scans am selben Ort.
 - Ein Abbiegemanöver umfasst Ausfahrt aus der bisherigen Markierung und Suche nach
   der gewünschten Linie. Die noch sichtbare Eingangslinie darf es nicht sofort beenden.
 - Die Linienregelung beginnt mit einer einfachen proportionalen Korrektur.
@@ -199,12 +206,14 @@ Ein State-Machine-Framework ist für diesen Umfang nicht erforderlich.
 - QR-Ergebnisse unterscheiden `FOUND`, `NOT_FOUND` und `ERROR`; der Parser
   unterscheidet gültige Kommandos und unbekannte Texte. Keine Substring-Regel
   interpretiert beliebige Inhalte als Ziel oder Abbiegung.
-- Das verbindliche V2-Format ist `ROUTE:EASY` oder `ROUTE:HARD`.
-  Aliase aus V1 (`level 1`, `level 2`) werden nur über eine explizite Tabelle
-  unterstützt. `left` und `right` sind keine Routenentscheidung und werden nicht
-  automatisch als gültige V2-Kommandos akzeptiert.
-- Geschwindigkeiten, Zeitlimits, Scanpositionen, Servooffset und Erkennungszeiten
-  liegen in `config.py`. Ungültige Konfiguration verhindert den Fahrtbeginn.
+- Die verbindlichen V2-QR-Werte sind `right`, `level1` und `level2`. Sie werden exakt
+  auf `RIGHT`, `LEVEL_1` und `LEVEL_2` abgebildet. `right` steht immer für den
+  einfachen Weg; `level1` und `level2` stehen für die schwereren Wege. Unbekannte
+  QR-Texte werden abgelehnt.
+- `TARGET_ROUTE` in `config.py` legt fest, welches Level gefahren werden soll und
+  darf nur `RIGHT`, `LEVEL_1` oder `LEVEL_2` enthalten. Geschwindigkeiten, Zeitlimits,
+  Scanpositionen, Servooffset und Erkennungszeiten liegen ebenfalls in `config.py`.
+  Eine ungültige Konfiguration verhindert den Fahrtbeginn.
 
 ## Umsetzungsschritte und Abnahme
 
@@ -216,7 +225,8 @@ Ein State-Machine-Framework ist für diesen Umfang nicht erforderlich.
 3. **Linienfolge:** Sensoranalyse, proportionale Regelung und begrenzte Liniensuche
    implementieren. Alle 32 binären Sensormuster auf definierte Behandlung prüfen;
    Verlaufstests decken kurze Aussetzer und dauerhaften Linienverlust ab.
-4. **Markierungen und QR:** Bestätigung, Scanphasen, Parser, Routenprofil und Manöver ergänzen.
+4. **X-Kreuzungen und QR:** X-Muster bestätigen, Scanphasen, Parser, Routenprofile
+   und Manöver ergänzen.
    Erfolglose Scans, unbekannte Texte, verspätete Ergebnisse, wiederholte Markierungen
    und Manöver-Timeouts testen. Keine dieser Fehlerfolgen darf `FINISHED` auslösen.
 5. **Fahrzeugtest:** Zunächst Motorzuordnung und Stoppen bei angehobenen Rädern prüfen,
@@ -232,9 +242,12 @@ Zustandswechsel und das Cleanup nach Initialisierungsfehlern prüfen.
 
 - Was löst den Start aus? Benötigt der Startbereich eine aktive Ausfahrt?
   Falls ja, wird dafür ein begrenzter Startabschnitt vor `FOLLOW_LINE` ergänzt.
-- Wie unterscheiden sich Kreuzung, Linienlücke, Punktmuster und Ziel eindeutig?
-- Welche QR-Texte kommen tatsächlich vor, und welche Bedeutung haben die Level?
-- Welche konkrete Abzweigung und welches Ziellinien-Muster gehören zu `EASY` und `HARD`?
+- Wie unterscheiden sich X-Kreuzung, Linienlücke, Punktmuster und Ziel eindeutig?
+- Welche konkrete Abzweigung beziehungsweise Kreuzungsfolge gehört zu `right`,
+  `level1` und `level2`?
+- Was passiert bei einem gültigen QR-Code, der nicht `TARGET_ROUTE` entspricht?
+  Planannahme: Die Kreuzung wird ohne Routenmanöver verlassen und die Linienfolge
+  wird fortgesetzt; alternativ muss die Strecke ein Stoppen als Fehler festlegen.
 - Darf das Fahrzeug bei fehlendem QR-Code weiterfahren? Planannahme: Nach begrenzten
   Versuchen mit `ERROR` stoppen; eine andere Regel muss ausdrücklich festgelegt werden.
 
