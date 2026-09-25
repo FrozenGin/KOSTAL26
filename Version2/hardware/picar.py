@@ -1,21 +1,13 @@
 """Optional PiCar adapter. Raspberry Pi dependencies are loaded only on construction."""
-import importlib.util
-from pathlib import Path
-
 from ..models import MotorCommand
 
 class PicarVehicle:
     def __init__(self):
-        # Keep the hardware implementation inside the V2 package.
-        source = Path(__file__).resolve().parents[1] / "picar.py"
-        spec = importlib.util.spec_from_file_location("kostal_v2_picar", source)
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"PiCar adapter not found at {source}")
-        module = importlib.util.module_from_spec(spec)
         try:
-            spec.loader.exec_module(module)
-            self._picar = module.Picar()
-        except Exception as exc:
+            # Same construction as the working example, but imported lazily.
+            from ..picar import Picar
+            self._picar = Picar()
+        except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
             raise RuntimeError("PiCar hardware is unavailable") from exc
 
     def read_line_sensors(self):
