@@ -1,0 +1,8 @@
+# SSH target used for copying and starting the robot.
+SSH_TARGET="pi@192.168.1.50"
+SSH_PASSWORD="robot-ssh-password"
+
+# Set to true to change the local PC's Wi-Fi before connecting to the robot.
+WIFI_CHANGE=false
+WIFI_SSID="robot-wifi"
+WIFI_PASSWORD="change-me"

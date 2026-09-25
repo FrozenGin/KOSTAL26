@@ -1,6 +1,9 @@
 from collections import deque
 from typing import Iterable, Optional, Tuple
-from ..models import Observation
+try:
+    from ..models import Observation
+except ImportError:
+    from models import Observation
 
 _POSITIONS = (-2.0, -1.0, 0.0, 1.0, 2.0)
 
@@ -22,11 +25,20 @@ class LineAnalyzer:
     def __init__(self, marker_samples: int = 2):
         self.marker_samples = max(1, marker_samples)
         self._x_history = deque(maxlen=self.marker_samples)
+        self._line_history = deque(maxlen=3)
 
     def update(self, values: Iterable[object]) -> Observation:
         result = analyze_line(values)
         self._x_history.append(result.x_intersection)
+        self._line_history.append(result.line_detected and not result.full_black)
+        dot_pattern = (
+            len(self._line_history) == 3
+            and list(self._line_history) == [True, False, True]
+        )
         if result.x_intersection and sum(self._x_history) == self.marker_samples:
-            return result
+            return Observation(
+                result.sensors, result.line_detected, result.line_position,
+                result.full_black, result.x_intersection, dot_pattern
+            )
         return Observation(result.sensors, result.line_detected, result.line_position,
-                           result.full_black, False)
+                           result.full_black, False, dot_pattern)

@@ -1,10 +1,14 @@
 import time
-from .config import Config
-from .hardware.picar import PicarVehicle
-from .hardware.qr_camera import QRScanner
-from .models import MotorCommand
-from .perception.line_analysis import LineAnalyzer
-from .state_machine import Context, StateMachine
+try:
+    from .config import Config
+    from .hardware.picar import PicarVehicle
+    from .hardware.qr_camera import QRScanner
+    from .state_machine import Context, StateMachine
+except ImportError:
+    from config import Config
+    from picar_adapter import PicarVehicle
+    from qr_camera import QRScanner
+    from state_machine import Context, StateMachine
 
 def run(vehicle, camera, config=Config(), clock=time.monotonic, cancelled=lambda: False):
     machine = StateMachine(Context(vehicle, camera, config), clock)
@@ -23,8 +27,8 @@ def run(vehicle, camera, config=Config(), clock=time.monotonic, cancelled=lambda
 def main():
     try:
         vehicle = PicarVehicle()
-        # Replace this decoder with the platform camera implementation.
-        camera = QRScanner(lambda: None, vehicle.set_camera_angle)
+        camera = QRScanner(set_position=vehicle.set_camera_angle)
+        camera.ready_sweep()
         run(vehicle, camera)
     except RuntimeError as exc:
         print(f"V2 could not start: {exc}")

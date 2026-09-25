@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 class StateId(str, Enum):
     INIT = "INIT"; WAIT_START = "WAIT_START"; START_EXIT = "START_EXIT"
     FOLLOW_LINE = "FOLLOW_LINE"; CHECK_MARKER = "CHECK_MARKER"; SCAN_QR = "SCAN_QR"
-    EXECUTE_MANEUVER = "EXECUTE_MANEUVER"; RECOVER_LINE = "RECOVER_LINE"
+    EXECUTE_MANEUVER = "EXECUTE_MANEUVER"; FIND_TARGET_LINE = "FIND_TARGET_LINE"; RECOVER_LINE = "RECOVER_LINE"
     FINISHED = "FINISHED"; ERROR = "ERROR"; STOPPED = "STOPPED"
 
 class Direction(str, Enum):
@@ -27,6 +27,7 @@ class Observation:
     line_position: Optional[float]
     full_black: bool
     x_intersection: bool
+    dot_pattern: bool = False
 
 @dataclass(frozen=True)
 class MotorCommand:

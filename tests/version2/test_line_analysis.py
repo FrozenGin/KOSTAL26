@@ -13,3 +13,10 @@ class LineAnalysisTests(unittest.TestCase):
         analyzer = LineAnalyzer(marker_samples=2)
         self.assertFalse(analyzer.update([True, False, True, False, True]).x_intersection)
         self.assertTrue(analyzer.update([True, False, True, False, True]).x_intersection)
+
+    def test_short_line_gap_is_detected_as_dot(self):
+        analyzer = LineAnalyzer(marker_samples=2)
+        analyzer.update([False, False, True, False, False])
+        analyzer.update([False] * 5)
+        result = analyzer.update([False, False, True, False, False])
+        self.assertTrue(result.dot_pattern)

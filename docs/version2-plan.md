@@ -35,7 +35,7 @@ The first V2 must follow this process:
 2. After leaving the start line, it drives slowly forward until the normal line is
    detected stably.
 3. It follows the line at a low, configurable speed.
-4. At a confirmed X-shaped intersection, it stops completely.
+4. At a confirmed complete-black QR marker line, it stops completely.
 5. The QR code is scanned from multiple camera positions. It contains either only a
    direction (`left` or `right`) or two text lines: level and direction.
 6. For a two-line QR code, the level is read exactly and compared with the
@@ -72,8 +72,8 @@ separate types; for example, `LEFT` is a direction, not an operating state.
 | `INIT` | Initialize hardware, validate configuration, stop motors | Ready -> `WAIT_START`; error -> `ERROR` |
 | `WAIT_START` | Wait with motors stopped on a completely black start line | Start line left -> `START_EXIT` |
 | `START_EXIT` | Drive slowly forward until the normal line is detected stably | Line found -> `FOLLOW_LINE`; timeout -> `ERROR` |
-| `FOLLOW_LINE` | Follow the line and curves using current sensor data | Confirmed X intersection -> `CHECK_MARKER`; persistent line loss -> `RECOVER_LINE` |
-| `CHECK_MARKER` | Stop and evaluate the X intersection using history and track rules | QR required -> `SCAN_QR`; false positive with valid line -> `FOLLOW_LINE`; confirmed goal -> `FINISHED`; unresolved/timeout -> `ERROR` |
+| `FOLLOW_LINE` | Follow the line and curves using current sensor data | Confirmed complete-black QR marker -> `CHECK_MARKER`; persistent line loss -> `RECOVER_LINE` |
+| `CHECK_MARKER` | Stop and evaluate the complete-black marker using history and track rules | QR required -> `SCAN_QR`; false positive with valid line -> `FOLLOW_LINE`; confirmed goal -> `FINISHED`; unresolved/timeout -> `ERROR` |
 | `SCAN_QR` | Scan QR from multiple camera positions while stopped | Direction-only QR or matching level -> direction to `EXECUTE_MANEUVER`; confirmed goal command -> `FINISHED`; attempts exhausted/camera error -> `ERROR` |
 | `EXECUTE_MANEUVER` | Execute the maneuver selected by the QR direction | Intersection left and target line stable -> `FOLLOW_LINE`; timeout -> `ERROR` |
 | `RECOVER_LINE` | Search for the line for a limited time using the last known direction | Stable line found -> `FOLLOW_LINE`; marker detected -> `CHECK_MARKER`; timeout -> `ERROR` |
@@ -198,8 +198,9 @@ state-machine framework is unnecessary for this scope.
   before normal steering control.
 - Markers and recovered lines must remain stable for a configurable duration. Line
   loss has its own timer.
-- A scan intersection is a confirmed X pattern. Re-enable intersection detection only
-  after the old X has definitely been left, preventing repeated scans at one location.
+- A QR scan marker is a confirmed complete-black sensor line after the start area.
+  Re-enable marker detection only after the old black line has definitely been left,
+  preventing repeated scans at one location.
 - A turn maneuver includes leaving the old marker and searching for the desired line.
   The still-visible entry line must not finish the maneuver immediately.
 - Start line exit uses slow forward motion until the normal line is detected stably.
@@ -229,7 +230,7 @@ state-machine framework is unnecessary for this scope.
 3. **Line following:** implement sensor analysis, proportional control, and bounded
    line search. Define behavior for all 32 binary sensor patterns; sequence tests must
    cover short interruptions and persistent line loss.
-4. **X intersections and QR:** confirm X patterns, add scan phases, parser, route
+4. **Black-line QR markers:** confirm complete-black markers, add scan phases, parser, route
    profiles, and maneuvers. Test failed scans, unknown text, late results, repeated
    markers, and maneuver timeouts. None of these failure paths may produce `FINISHED`.
 5. **Vehicle test:** first verify motor mapping and stopping with the wheels lifted,
@@ -245,7 +246,7 @@ and cleanup after initialization failures.
 
 - The start signal is leaving a completely black start line. The duration required for
   stable start-line and exit detection still needs to be configured.
-- How can an X intersection, line gap, other point patterns, and the goal be clearly
+- How can a complete-black QR marker, line gap, other point patterns, and the goal be clearly
   distinguished?
 - Which exact branch or intersection sequence belongs to each level and direction?
 - What happens when a valid QR code has a level different from `TARGET_LEVEL`?

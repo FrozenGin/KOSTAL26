@@ -1,11 +1,17 @@
 """Optional PiCar adapter. Raspberry Pi dependencies are loaded only on construction."""
-from ..models import MotorCommand
+try:
+    from ..models import MotorCommand
+except ImportError:
+    from models import MotorCommand
 
 class PicarVehicle:
     def __init__(self):
         try:
             # Same construction as the working example, but imported lazily.
-            from ..picar import Picar
+            try:
+                from ..picar import Picar
+            except ImportError:
+                from picar import Picar
             self._picar = Picar()
         except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
             raise RuntimeError("PiCar hardware is unavailable") from exc
