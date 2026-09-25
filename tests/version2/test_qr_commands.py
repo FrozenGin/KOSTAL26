@@ -15,10 +15,12 @@ class QRCommandTests(unittest.TestCase):
             self.assertIsNone(parse_qr_command(value))
 
     def test_scanner_rotates_positions(self):
-        positions = []
-        scanner = QRScanner(lambda position: positions.append(position) or None,
-                            positions.append)
+        decoded_positions = []
+        camera_angles = []
+        scanner = QRScanner(lambda position: decoded_positions.append(position) or None,
+                            camera_angles.append)
         scanner.start_scan(1)
         for _ in range(4):
             scanner.poll()
-        self.assertEqual(positions[:5], ["left", "left", "center", "center", "right"])
+        self.assertEqual(decoded_positions, ["left", "center", "right", "left"])
+        self.assertEqual(camera_angles[:5], [-75, 0, 75, -75, 0])

@@ -5,6 +5,7 @@ from ..models import QRResultKind
 class QRScanner:
     """Non-blocking scan coordinator for left, center, and right camera views."""
     POSITIONS = ("left", "center", "right")
+    ANGLES = {"left": -75, "center": 0, "right": 75}
     def __init__(self, decoder: Callable, set_position: Optional[Callable] = None):
         self.decoder = decoder
         self._set_position = set_position
@@ -20,7 +21,7 @@ class QRScanner:
         if position not in self.POSITIONS:
             raise ValueError("invalid scan position")
         if self._set_position is not None:
-            self._set_position(position)
+            self._set_position(self.ANGLES[position])
 
     def poll(self):
         if self._pending is None:

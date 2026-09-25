@@ -6,8 +6,9 @@ from ..models import MotorCommand
 
 class PicarVehicle:
     def __init__(self):
-        source = Path(__file__).resolve().parents[2] / "Version 1" / "picar.py"
-        spec = importlib.util.spec_from_file_location("kostal_v1_picar", source)
+        # Keep the hardware implementation inside the V2 package.
+        source = Path(__file__).resolve().parents[1] / "picar.py"
+        spec = importlib.util.spec_from_file_location("kostal_v2_picar", source)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"PiCar adapter not found at {source}")
         module = importlib.util.module_from_spec(spec)
